@@ -1,38 +1,38 @@
 package part4sql
 
 import org.apache.spark.sql.{SaveMode, SparkSession}
-import org.apache.spark.sql.functions._
+import org.apache.spark.sql.functions.col
 
 object SparkSql extends App {
-
   val spark = SparkSession.builder()
     .appName("Spark SQL Practice")
-    .config("spark.master", "local")
+    .config("spark.master","local")
     .config("spark.sql.warehouse.dir", "src/main/resources/warehouse")
-    // only for Spark 2.4 users:
-    // .config("spark.sql.legacy.allowCreatingManagedTableUsingNonemptyLocation", "true")
     .getOrCreate()
 
   val carsDF = spark.read
-    .option("inferSchema", "true")
+    .option("inferSchema","true")
     .json("src/main/resources/data/cars.json")
 
   // regular DF API
   carsDF.select(col("Name")).where(col("Origin") === "USA")
 
   // use Spark SQL
+  // create table name cars in spark sql using df of carsDF
   carsDF.createOrReplaceTempView("cars")
   val americanCarsDF = spark.sql(
     """
-      |select Name from cars where Origin = 'USA'
-    """.stripMargin)
+      |select Name from cars where Origin = "USA"
+      |""".stripMargin)
 
-  // we can run ANY SQL statement
+  americanCarsDF.show
+
   spark.sql("create database rtjvm")
   spark.sql("use rtjvm")
   val databasesDF = spark.sql("show databases")
+  databasesDF.show
 
-  // transfer tables from a DB to Spark tables
+  // transfer tables from a DB to Spark Tables
   val driver = "org.postgresql.Driver"
   val url = "jdbc:postgresql://localhost:5432/rtjvm"
   val user = "docker"
@@ -42,16 +42,15 @@ object SparkSql extends App {
     .format("jdbc")
     .option("driver", driver)
     .option("url", url)
+    .option("dbtable", s"public.$tableName")
     .option("user", user)
     .option("password", password)
-    .option("dbtable", s"public.$tableName")
     .load()
 
-  def transferTables(tableNames: List[String], shouldWriteToWarehouse: Boolean = false) = tableNames.foreach { tableName =>
+  def transferTables(tableNames: List[String], shouldWriteToWarehouse: Boolean = false): Unit = tableNames.foreach { tableName =>
     val tableDF = readTable(tableName)
     tableDF.createOrReplaceTempView(tableName)
-
-    if (shouldWriteToWarehouse) {
+    if(shouldWriteToWarehouse) {
       tableDF.write
         .mode(SaveMode.Overwrite)
         .saveAsTable(tableName)
@@ -67,37 +66,28 @@ object SparkSql extends App {
     "dept_manager")
   )
 
-  // read DF from loaded Spark tables
-  val employeesDF2 = spark.read.table("employees")
+  // read DF from warehouse
+  val employeesDF2 = spark.read
+    .table("employees")
 
-  /**
-    * Exercises
-    *
-    * 1. Read the movies DF and store it as a Spark table in the rtjvm database.
-    * 2. Count how many employees were hired in between Jan 1 1999 and Jan 1 2000.
-    * 3. Show the average salaries for the employees hired in between those dates, grouped by department.
-    * 4. Show the name of the best-paying department for employees hired in between those dates.
-    */
-
-  // 1
-  val moviesDF = spark.read
-    .option("inferSchema", "true")
+  val movieDF = spark.read
+    .option("inferSchema","true")
     .json("src/main/resources/data/movies.json")
 
-  moviesDF.write
-    .mode(SaveMode.Overwrite)
-    .saveAsTable("movies")
+//  movieDF.write
+//    .mode(SaveMode.Overwrite)
+//    .saveAsTable("movies")
 
-  // 2
+  // 2.
   spark.sql(
     """
       |select count(*)
       |from employees
       |where hire_date > '1999-01-01' and hire_date < '2000-01-01'
-    """.stripMargin
-  )
+      |""".stripMargin
+  ).show()
 
-  // 3
+  // 3.
   spark.sql(
     """
       |select de.dept_no, avg(s.salary)
@@ -106,8 +96,8 @@ object SparkSql extends App {
       | and e.emp_no = de.emp_no
       | and e.emp_no = s.emp_no
       |group by de.dept_no
-    """.stripMargin
-  )
+      |""".stripMargin
+  ).show()
 
   // 4
   spark.sql(
@@ -121,6 +111,6 @@ object SparkSql extends App {
       |group by d.dept_name
       |order by payments desc
       |limit 1
-    """.stripMargin
+      |""".stripMargin
   ).show()
 }

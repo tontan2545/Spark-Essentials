@@ -1,86 +1,60 @@
 package part3typesdatasets
 
-import java.sql.Date
-
-import org.apache.spark.sql.{DataFrame, Dataset, Encoders, SparkSession}
+import org.apache.spark.sql.{Dataset, Encoder, Encoders, SparkSession}
 import org.apache.spark.sql.functions._
 
-
 object Datasets extends App {
-
   val spark = SparkSession.builder()
     .appName("Datasets")
-    .config("spark.master", "local")
+    .config("spark.master","local")
     .getOrCreate()
 
-  val numbersDF: DataFrame = spark.read
+  val numbersDF = spark.read
     .format("csv")
-    .option("header", "true")
-    .option("inferSchema", "true")
+    .option("header","true")
+    .option("inferSchema","true")
     .load("src/main/resources/data/numbers.csv")
 
   numbersDF.printSchema()
+  import spark.implicits._
+  val numbersDS = numbersDF.as[Int]
 
-  // convert a DF to a Dataset
-  implicit val intEncoder = Encoders.scalaInt
-  val numbersDS: Dataset[Int] = numbersDF.as[Int]
-
-  // dataset of a complex type
-  // 1 - define your case class
+  // dataset of complex type
   case class Car(
                 Name: String,
-                Miles_per_Gallon: Option[Double],
+                Miles_Per_Gallon: Option[Double],
                 Cylinders: Long,
                 Displacement: Double,
                 Horsepower: Option[Long],
                 Weight_in_lbs: Long,
                 Acceleration: Double,
-                Year: Date,
+                Year: String,
                 Origin: String
                 )
-
-  // 2 - read the DF from the file
-  def readDF(filename: String) = spark.read
-    .option("inferSchema", "true")
-    .json(s"src/main/resources/data/$filename")
-
+  def readDF(fileName: String) = spark.read
+    .option("inferSchema","true")
+    .json(s"src/main/resources/data/$fileName")
   val carsDF = readDF("cars.json")
-
-  // 3 - define an encoder (importing the implicits)
-  import spark.implicits._
-  // 4 - convert the DF to DS
   val carsDS = carsDF.as[Car]
 
-  // DS collection functions
-  numbersDS.filter(_ < 100)
+  // DS Collections functions
+  numbersDS.filter(_ < 100).show
 
-  // map, flatMap, fold, reduce, for comprehensions ...
   val carNamesDS = carsDS.map(car => car.Name.toUpperCase())
-
-  /**
-    * Exercises
-    *
-    * 1. Count how many cars we have
-    * 2. Count how many POWERFUL cars we have (HP > 140)
-    * 3. Average HP for the entire dataset
-    */
+  carNamesDS.show
 
   // 1
-  val carsCount = carsDS.count
-  println(carsCount)
-
+  val carCount = carsDS.count()
   // 2
-  println(carsDS.filter(_.Horsepower.getOrElse(0L) > 140).count)
-
+  val countPowerfulCars = carsDS.filter(car => car.Horsepower.getOrElse(0L) < 140).count()
   // 3
-  println(carsDS.map(_.Horsepower.getOrElse(0L)).reduce(_ + _) / carsCount)
+  val countAverageHP = carsDS.map(car => car.Horsepower.getOrElse(0L)).reduce(_ + _) / carsDS.count()
 
-  // also use the DF functions!
+  // also use DF functions since DF is a generic of DS
   carsDS.select(avg(col("Horsepower")))
 
-
   // Joins
-  case class Guitar(id: Long, make: String, model: String, guitarType: String)
+  case class Guitar(id: Long, model: String, make: String, guitarType: String)
   case class GuitarPlayer(id: Long, name: String, guitars: Seq[Long], band: Long)
   case class Band(id: Long, name: String, hometown: String, year: Long)
 
@@ -88,24 +62,16 @@ object Datasets extends App {
   val guitarPlayersDS = readDF("guitarPlayers.json").as[GuitarPlayer]
   val bandsDS = readDF("bands.json").as[Band]
 
-  val guitarPlayerBandsDS: Dataset[(GuitarPlayer, Band)] = guitarPlayersDS.joinWith(bandsDS, guitarPlayersDS.col("band") === bandsDS.col("id"), "inner")
-
-  /**
-    * Exercise: join the guitarsDS and guitarPlayersDS, in an outer join
-    * (hint: use array_contains)
-    */
+  val guitarPlayerBandsDS: Dataset[(GuitarPlayer,Band)] = guitarPlayersDS.joinWith(bandsDS, guitarPlayersDS.col("band") === bandsDS.col("id"))
+  guitarPlayerBandsDS.show
 
   guitarPlayersDS
     .joinWith(guitarsDS, array_contains(guitarPlayersDS.col("guitars"), guitarsDS.col("id")), "outer")
     .show()
 
-  // Grouping DS
+  // grouping datasets
+  val carsGroupedByOrigin = carsDS.groupByKey(_.Origin).count()
+  carsGroupedByOrigin.show()
 
-  val carsGroupedByOrigin = carsDS
-    .groupByKey(_.Origin)
-    .count()
-    .show()
-
-  // joins and groups are WIDE transformations, will involve SHUFFLE operations
-
+  // joins and groups are WIDE transformations (Expensive!), will involve SHUFFLE operations
 }
